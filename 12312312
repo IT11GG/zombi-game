@@ -1,0 +1,590 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8" />
+<title>Зомбі-шутер з хвилями та босом</title>
+<style>
+  body {
+    margin: 0; 
+    background: #222;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    user-select: none;
+  }
+  canvas {
+    display: block;
+    background: #111;
+    margin: 0 auto;
+    border: 3px solid #555;
+    box-shadow: 0 0 20px #0f0;
+  }
+  #ui {
+    position: fixed;
+    top: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 800px;
+    color: #0f0;
+    display: flex;
+    justify-content: space-between;
+    font-size: 20px;
+    font-weight: bold;
+    text-shadow: 0 0 5px #0f0;
+    z-index: 10;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  #healthBar {
+    order: 10;
+    width: 100%;
+    max-width: 200px;
+    height: 25px;
+    background: #333;
+    border: 2px solid #0f0;
+    border-radius: 5px;
+    overflow: hidden;
+    margin-top: 5px;
+  }
+  #healthFill {
+    height: 100%;
+    background: linear-gradient(90deg, #f00, #800);
+    width: 100%;
+    transition: width 0.3s ease;
+  }
+  #weaponSelector {
+    display: flex;
+    gap: 10px;
+  }
+  .weapon {
+    padding: 5px 12px;
+    border: 2px solid #0f0;
+    border-radius: 5px;
+    cursor: pointer;
+    user-select: none;
+  }
+  .weapon.active {
+    background: #0f0;
+    color: #000;
+    font-weight: bold;
+  }
+  #score, #money, #wave {
+    min-width: 100px;
+    text-align: right;
+  }
+  #shop {
+    position: fixed;
+    top: 80px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 400px;
+    background: #111;
+    border: 2px solid #0f0;
+    border-radius: 10px;
+    padding: 20px;
+    color: #0f0;
+    font-weight: bold;
+    font-size: 18px;
+    box-shadow: 0 0 15px #0f0;
+    display: none;
+    z-index: 100;
+  }
+  #shop h2 {
+    text-align: center;
+    margin-top: 0;
+    margin-bottom: 15px;
+  }
+  .shop-item {
+    margin: 10px 0;
+    padding: 8px;
+    border: 1px solid #0f0;
+    border-radius: 6px;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+  }
+  .shop-item:hover {
+    background: #0f0;
+    color: #000;
+  }
+  #instructions {
+    position: fixed;
+    bottom: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: #0f0;
+    font-size: 14px;
+    user-select: none;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+
+<div id="ui">
+  <div id="healthBar"><div id="healthFill"></div></div>
+  <div id="weaponSelector">
+    <div class="weapon active" data-weapon="0">1 - Пістолет</div>
+    <div class="weapon" data-weapon="1">2 - Помповик</div>
+    <div class="weapon" data-weapon="2">3 - Автомат</div>
+    <div class="weapon" data-weapon="3">4 - Снайпер</div>
+  </div>
+  <div id="score">Очки: 0</div>
+  <div id="money">Гроші: 0</div>
+  <div id="wave">Хвиля: 1</div>
+</div>
+
+<div id="shop">
+  <h2>МАГАЗИН (Натисніть M, щоб вийти)</h2>
+  <div class="shop-item" id="healBuy">Аптечка (+30 HP) - 50 грошей</div>
+  <div class="shop-item" data-upgrade="0">Покращити Пістолет (+5 урону) - <span id="price0">100</span> грошей</div>
+  <div class="shop-item" data-upgrade="1">Покращити Помповик (+10 урону) - <span id="price1">150</span> грошей</div>
+  <div class="shop-item" data-upgrade="2">Покращити Автомат (+3 урону) - <span id="price2">200</span> грошей</div>
+  <div class="shop-item" data-upgrade="3">Покращити Снайпер ( +15 урону) - <span id="price3">300</span> грошей</div>
+</div>
+
+<canvas id="gameCanvas" width="800" height="600"></canvas>
+
+<div id="instructions">
+  Управління: WASD / стрілки — рух, мишка — ціль, ЛКМ — стріляти,<br>
+  1-4 — вибір зброї, M — магазин (після хвилі)
+</div>
+
+<script>
+const canvas = document.getElementById("gameCanvas");
+const ctx = canvas.getContext("2d");
+
+const WIDTH = canvas.width;
+const HEIGHT = canvas.height;
+
+const PLAYER_SIZE = 30;
+const ZOMBIE_SIZE = 30;
+
+const weapons = [
+  { name: "Пістолет", bulletSpeed: 15, cooldown: 400, bulletColor: "yellow", bulletRadius: 5, damage: 10, upgradeCost: 100, upgradeDamage: 5 },
+  { name: "Помповик", bulletSpeed: 12, cooldown: 800, bulletColor: "orange", bulletRadius: 12, damage: 25, upgradeCost: 150, upgradeDamage: 10 },
+  { name: "Автомат", bulletSpeed: 20, cooldown: 100, bulletColor: "cyan", bulletRadius: 4, damage: 7, upgradeCost: 200, upgradeDamage: 3 },
+  { name: "Снайпер", bulletSpeed: 25, cooldown: 1200, bulletColor: "red", bulletRadius: 6, damage: 50, upgradeCost: 300, upgradeDamage: 15 }
+];
+
+let currentWeaponIndex = 0;
+let lastShotTime = 0;
+
+let keys = {};
+let mousePos = {x: WIDTH/2, y: HEIGHT/2};
+
+const player = {
+  x: WIDTH / 2,
+  y: HEIGHT / 2,
+  size: PLAYER_SIZE,
+  color: "blue",
+  health: 100,
+  maxHealth: 100
+};
+
+const bullets = [];
+const zombies = [];
+
+let score = 0;
+let money = 0;
+let wave = 1;
+let zombiesToSpawn = 0;
+let spawnedZombies = 0;
+let spawnInterval = null;
+let inShop = false;
+let shopJustClosed = false;
+let gameOver = false;
+
+// UI елементи
+const healthFill = document.getElementById("healthFill");
+const scoreDisplay = document.getElementById("score");
+const moneyDisplay = document.getElementById("money");
+const waveDisplay = document.getElementById("wave");
+const weaponElements = document.querySelectorAll(".weapon");
+const shop = document.getElementById("shop");
+const healBuy = document.getElementById("healBuy");
+const upgradeItems = document.querySelectorAll(".shop-item[data-upgrade]");
+
+// Функції UI
+function updateHealthUI() {
+  const percent = (player.health / player.maxHealth) * 100;
+  healthFill.style.width = percent + "%";
+}
+function updateScoreUI() {
+  scoreDisplay.textContent = Очки: ${score};
+}
+function updateMoneyUI() {
+  moneyDisplay.textContent = Гроші: ${money};
+}
+function updateWaveUI() {
+  waveDisplay.textContent = Хвиля: ${wave};
+}
+function updateWeaponUI() {
+  weaponElements.forEach((el, i) => {
+    if(i === currentWeaponIndex) el.classList.add("active");
+    else el.classList.remove("active");
+  });
+  // Оновити ціну апгрейду
+  upgradeItems.forEach((item, i) => {
+    const cost = weapons[i].upgradeCost;
+    item.querySelector("span").textContent = cost;
+  });
+}
+
+// Перемикання зброї через UI клік
+weaponElements.forEach(el => {
+  el.addEventListener("click", () => {
+    if(inShop) return; // не можна в магазині
+    currentWeaponIndex = Number(el.dataset.weapon);
+    updateWeaponUI();
+  });
+});
+
+// --- Малювання ---
+function drawRect(x, y, size, color) {
+  ctx.fillStyle = color;
+  ctx.fillRect(x - size/2, y - size/2, size, size);
+}
+function drawCircle(x, y, radius, color) {
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.arc(x, y, radius, 0, Math.PI*2);
+  ctx.fill();
+}
+function drawPlayer() {
+  drawRect(player.x, player.y, player.size, player.color);
+}
+function drawBullets() {
+  bullets.forEach(b => drawCircle(b.x, b.y, b.radius, b.color));
+}
+function drawZombies() {
+  zombies.forEach(z => {
+    if(z.isBoss) {
+      // Бос — великий червоний квадрат з чорним контуром
+      ctx.fillStyle = "darkred";
+      ctx.fillRect(z.x - z.size/2, z.y - z.size/2, z.size, z.size);
+      ctx.strokeStyle = "black";
+      ctx.lineWidth = 4;
+      ctx.strokeRect(z.x - z.size/2, z.y - z.size/2, z.size, z.size);
+
+      // Здоров'я босса (зелений бар)
+      ctx.fillStyle = "limegreen";
+      let hpWidth = (z.health / z.maxHealth) * z.size;
+      ctx.fillRect(z.x - z.size/2, z.y - z.size/2 - 10, hpWidth, 6);
+    } else {
+      drawRect(z.x, z.y, z.size, z.color);
+      // Здоров'я звичайного зомбі (червоний бар)
+      ctx.fillStyle = "red";
+      let hpWidth = (z.health / z.maxHealth) * z.size;
+      ctx.fillRect(z.x - z.size/2, z.y - z.size/2 - 8, hpWidth, 4);
+    }
+  });
+}
+
+// Рух гравця
+function movePlayer() {
+  if(gameOver || inShop) return;
+  const speed = 7;
+  if((keys["ArrowLeft"] || keys["a"] || keys["A"]) && player.x - player.size/2 > 0) player.x -= speed;
+  if((keys["ArrowRight"] || keys["d"] || keys["D"]) && player.x + player.size/2 < WIDTH) player.x += speed;
+  if((keys["ArrowUp"] || keys["w"] || keys["W"]) && player.y - player.size/2 > 0) player.y -= speed;
+  if((keys["ArrowDown"] || keys["s"] || keys["S"]) && player.y + player.size/2 < HEIGHT) player.y += speed;
+}
+
+// Стрілянина
+function shoot() {
+  if(gameOver || inShop) return;
+
+  const now = Date.now();
+  const weapon = weapons[currentWeaponIndex];
+  if(now - lastShotTime < weapon.cooldown) return;
+  lastShotTime = now;
+
+  if(weapon.name === "Помповик") {
+    // Помповик — стріляє снарядами в 5 різних напрямках (центральний + +-0.2 радіан)
+    let baseAngle = Math.atan2(mousePos.y - player.y, mousePos.x - player.x);
+    const spread = [0, -0.2, 0.2, -0.4, 0.4];
+    spread.forEach(angOffset => {
+      const angle = baseAngle + angOffset;
+      bullets.push({
+        x: player.x,
+        y: player.y,
+        dx: weapon.bulletSpeed * Math.cos(angle),
+        dy: weapon.bulletSpeed * Math.sin(angle),
+        radius: weapon.bulletRadius,
+        color: weapon.bulletColor,
+        damage: weapon.damage
+      });
+    });
+  } else {
+    let angle = Math.atan2(mousePos.y - player.y, mousePos.x - player.x);
+    bullets.push({
+      x: player.x,
+      y: player.y,
+      dx: weapon.bulletSpeed * Math.cos(angle),
+      dy: weapon.bulletSpeed * Math.sin(angle),
+      radius: weapon.bulletRadius,
+      color: weapon.bulletColor,
+      damage: weapon.damage
+    });
+  }
+}
+
+// Рух куль
+function moveBullets() {
+  for(let i = bullets.length - 1; i >= 0; i--) {
+    let b = bullets[i];
+    b.x += b.dx;
+    b.y += b.dy;
+
+    // Видалити кулі, що вилетіли за межі
+    if(b.x < 0 || b.x > WIDTH || b.y < 0 || b.y > HEIGHT) {
+      bullets.splice(i,1);
+    }
+  }
+}
+
+// Спавн зомбі (звичайних або боса)
+function spawnZombie() {
+  let isBoss = false;
+  if(wave % 5 === 0 && spawnedZombies === 0) {
+    // Спавнимо 1 боса замість звичайних зомбі на 5-й хвилі
+    isBoss = true;
+  }
+
+  let spawnEdge = Math.floor(Math.random()*4); // 0-верх,1-право,2-низ,3-ліво
+  let x, y;
+  switch(spawnEdge) {
+    case 0: // верх
+      x = Math.random() * WIDTH;
+      y = -ZOMBIE_SIZE;
+      break;
+    case 1: // право
+      x = WIDTH + ZOMBIE_SIZE;
+      y = Math.random() * HEIGHT;
+      break;
+    case 2: // низ
+      x = Math.random() * WIDTH;
+      y = HEIGHT + ZOMBIE_SIZE;
+      break;
+    case 3: // ліво
+      x = -ZOMBIE_SIZE;
+      y = Math.random() * HEIGHT;
+      break;
+  }
+
+  if(isBoss) {
+    zombies.push({
+      x, y,
+      size: 60,
+      color: "darkred",
+      health: 300 + wave*50,
+      maxHealth: 300 + wave*50,
+      speed: 1.8 + wave*0.05,
+      isBoss: true
+    });
+    spawnedZombies = 1;
+  } else {
+    zombies.push({
+      x, y,
+      size: ZOMBIE_SIZE,
+      color: "darkgreen",
+      health: 30 + wave*5,
+      maxHealth: 30 + wave*5,
+      speed: 1 + wave*0.1,
+      isBoss: false
+    });
+    spawnedZombies++;
+  }
+}
+
+// Запуск хвилі
+function startWave() {
+  if(gameOver) return;
+  inShop = false;
+  shop.style.display = "none";
+  updateWaveUI();
+
+  spawnedZombies = 0;
+  zombiesToSpawn = wave * 5 + (wave % 5 === 0 ? 1 : 0);
+
+  if(spawnInterval) clearInterval(spawnInterval);
+  spawnInterval = setInterval(() => {
+    if(spawnedZombies < zombiesToSpawn) {
+      spawnZombie();
+    } else {
+      clearInterval(spawnInterval);
+      // Чекатимемо поки всіх зомбі не вб'ємо
+      waitForWaveClear();
+    }
+  }, 700);
+}
+
+// Чекати поки всі зомбі знищені
+function waitForWaveClear() {
+  let checkInterval = setInterval(() => {
+    if(zombies.length === 0) {
+      clearInterval(checkInterval);
+      openShop();
+    }
+  }, 1000);
+}
+
+// Відкрити магазин
+function openShop() {
+  inShop = true;
+  shop.style.display = "block";
+  shopJustClosed = false;
+}
+
+// Закрити магазин
+function closeShop() {
+  shop.style.display = "none";
+  if(shopJustClosed) return;
+  shopJustClosed = true;
+  inShop = false;
+  setTimeout(() => {
+    shopJustClosed = false;
+    wave++;
+    startWave();
+  }, 500);
+}
+
+// Логіка зомбі руху
+function moveZombies() {
+  zombies.forEach(z => {
+    let dx = player.x - z.x;
+    let dy = player.y - z.y;
+    let dist = Math.sqrt(dx*dx + dy*dy);
+    if(dist > 0) {
+      z.x += (dx/dist)*z.speed;
+      z.y += (dy/dist)*z.speed;
+    }
+    // Атакуємо гравця, якщо близько
+    if(dist < (z.size/2 + player.size/2)) {
+      // Зменшуємо здоров'я гравця
+      player.health -= z.isBoss ? 1 : 0.3;
+      if(player.health <= 0) {
+        player.health = 0;
+        gameOver = true;
+        alert("Гра закінчена! Ти помер!");
+        window.location.reload();
+      }
+      updateHealthUI();
+    }
+  });
+}
+
+// Колізії куль і зомбі
+function bulletZombieCollision() {
+  for(let i = bullets.length - 1; i >= 0; i--) {
+    let b = bullets[i];
+    for(let j = zombies.length - 1; j >= 0; j--) {
+      let z = zombies[j];
+      let dx = b.x - z.x;
+      let dy = b.y - z.y;
+      let dist = Math.sqrt(dx*dx + dy*dy);
+      if(dist < b.radius + z.size/2) {
+        // Влучили
+        z.health -= b.damage;
+        bullets.splice(i,1);
+        if(z.health <= 0) {
+          // Вбили зомбі
+          score += z.isBoss ? 50 : 10;
+          money += z.isBoss ? 100 : 20;
+          zombies.splice(j,1);
+          updateScoreUI();
+          updateMoneyUI();
+        }
+        break;
+      }
+    }
+  }
+}
+
+// Купівля аптечки
+healBuy.addEventListener("click", () => {
+  if(money >= 50 && player.health < player.maxHealth) {
+    player.health += 30;
+    if(player.health > player.maxHealth) player.health = player.maxHealth;
+    money -= 50;
+    updateHealthUI();
+    updateMoneyUI();
+  }
+});
+
+// Покупка покращень зброї
+upgradeItems.forEach(item => {
+  item.addEventListener("click", () => {
+    let idx = Number(item.dataset.upgrade);
+    let weapon = weapons[idx];
+    if(money >= weapon.upgradeCost) {
+      money -= weapon.upgradeCost;
+      weapon.damage += weapon.upgradeDamage;
+      // Збільшення ціни для наступного апгрейду
+      weapon.upgradeCost = Math.floor(weapon.upgradeCost * 1.5);
+      updateMoneyUI();
+      updateWeaponUI();
+    }
+  });
+});
+
+// Управління клавішами
+window.addEventListener("keydown", e => {
+  keys[e.key] = true;
+  if(e.key === "m" || e.key === "M") {
+    if(inShop) {
+      closeShop();
+    } else if(zombies.length === 0 && !gameOver) {
+      openShop();
+    }
+  }
+});
+window.addEventListener("keyup", e => {
+  keys[e.key] = false;
+});
+canvas.addEventListener("mousemove", e => {
+  const rect = canvas.getBoundingClientRect();
+  mousePos.x = e.clientX - rect.left;
+  mousePos.y = e.clientY - rect.top;
+});
+canvas.addEventListener("mousedown", e => {
+  shoot();
+});
+
+// Перемикання зброї через цифри 1-4
+window.addEventListener("keydown", e => {
+  if(inShop) return;
+  if(["1","2","3","4"].includes(e.key)) {
+    currentWeaponIndex = Number(e.key) - 1;
+    updateWeaponUI();
+  }
+});
+
+// Основний цикл гри
+function gameLoop() {
+  ctx.clearRect(0, 0, WIDTH, HEIGHT);
+
+  movePlayer();
+  moveBullets();
+  moveZombies();
+  bulletZombieCollision();
+
+  drawPlayer();
+  drawBullets();
+  drawZombies();
+
+  updateHealthUI();
+
+  if(!gameOver) requestAnimationFrame(gameLoop);
+}
+
+updateWeaponUI();
+updateHealthUI();
+updateScoreUI();
+updateMoneyUI();
+updateWaveUI();
+startWave();
+gameLoop();
+</script>
+
+</body>
+</html>
